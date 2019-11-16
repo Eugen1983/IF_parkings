@@ -37,38 +37,47 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     public static final int NEW_PARKING_ACTIVITY_REQUEST_CODE = 1;
 
     private ParkingViewModel mParkingViewModel;
-
-    GoogleMap googleMap;
-    Marker currentMarker;
-    int markersCount = 0;
-    List<Parking> parkingsList;
-
-
+    private Marker currentMarker;
+    private int markersCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-//        Toolbar toolbar = findViewById(R.id.toolbar);
-//        setSupportActionBar(toolbar);
-
-        mParkingViewModel = ViewModelProviders.of(this).get(ParkingViewModel.class);
-
-
-        mParkingViewModel.getAllParkings().observe(this, new Observer<List<Parking>>() {
-            @Override
-            public void onChanged(@Nullable final List<Parking> parkings) {
-                parkingsList = parkings;
-                if (googleMap != null) {
-                    updateMarkers();
-                }
-            }
-        });
-
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
+    }
+
+    public void onMapReady(final GoogleMap googleMap) {
+
+        LatLng startPosition = new LatLng(48.918620, 24.717910);
+        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(startPosition, 13));
+        googleMap.setOnMarkerClickListener(new GoogleMap.OnMarkerClickListener() {
+            @Override
+            public boolean onMarkerClick(Marker marker) {
+                currentMarker = marker;
+                Log.d(MyConstants.myLog, "Current marker is changed to " + currentMarker);
+                return false;
+            }
+        });
+
+        mParkingViewModel = ViewModelProviders.of(this).get(ParkingViewModel.class);
+        mParkingViewModel.getAllParkings().observe(this, new Observer<List<Parking>>() {
+            @Override
+            public void onChanged(@Nullable final List<Parking> parkings) {
+                googleMap.clear();
+                markersCount = 0;
+                for (Parking parking : parkings) {
+                    Log.d(MyConstants.myLog, "Parking with id = " + parking.getId() + ", latitude = "
+                            + parking.getLatitude() + ", longitude = " + parking.getLongitude() + ", address = " + parking.getAddress());
+                    LatLng position = new LatLng(parking.getLatitude(), parking.getLongitude());
+                    MarkerOptions marker = new MarkerOptions().position(position).title(parking.getAddress());
+                    googleMap.addMarker(marker).setTag(String.valueOf(parking.getId()));
+                    Log.d(MyConstants.myLog, "Added markers: " + ++markersCount);
+                }            }
+        });
 
         FloatingActionButton fab = findViewById(R.id.fab);
         fab.setOnClickListener(new View.OnClickListener() {
@@ -85,37 +94,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         });
     }
 
-    void updateMarkers() {
-        googleMap.clear();
-        markersCount = 0;
-        for (Parking parking : parkingsList) {
-            Log.d(MyConstants.myLog, "Parking with id = " + parking.getId() + ", latitude = "
-                    + parking.getLatitude() + ", longitude = " + parking.getLongitude() + ", address = " + parking.getAddress());
-            LatLng position = new LatLng(parking.getLatitude(), parking.getLongitude());
-            MarkerOptions marker = new MarkerOptions().position(position).title(parking.getAddress());
-            googleMap.addMarker(marker).setTag(String.valueOf(parking.getId()));
-            Log.d(MyConstants.myLog, "Added markers: " + ++markersCount);
-        }
-    }
-
-    public void onMapReady(GoogleMap googleMap) {
-        this.googleMap = googleMap;
-        if (parkingsList != null)
-            updateMarkers();
-        LatLng startPosition = new LatLng(48.918620, 24.717910);
-        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(startPosition, 13));
-        googleMap.setOnMarkerClickListener(new GoogleMap.OnMarkerClickListener() {
-            @Override
-            public boolean onMarkerClick(Marker marker) {
-                currentMarker = marker;
-                Log.d(MyConstants.myLog, "Current marker is changed to " + currentMarker);
-                return false;
-            }
-        });
-    }
-
-
-
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.menu_main, menu);
@@ -125,17 +103,19 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.clear_data) {
-            mParkingViewModel.deleteAllParkings();
+        switch (id) {
+            case R.id.clear_data:
+                mParkingViewModel.deleteAllParkings();
+                break;
+            case R.id.delete_marker:
+                if (currentMarker != null) {
+                    Log.d(MyConstants.myLog, "Deleting marker " + currentMarker);
+                    int currentMarkerId = Integer.parseInt((String) currentMarker.getTag());
+                    mParkingViewModel.deleteParking(currentMarkerId);
+                    currentMarker = null;
+                }
+                break;
         }
-        if (id == R.id.delete_marker)
-            if (currentMarker != null) {
-                Log.d(MyConstants.myLog, "Deleting marker " + currentMarker);
-                int currentMarkerId = Integer.parseInt((String) currentMarker.getTag());
-//                currentMarker.remove();
-                mParkingViewModel.deleteParking(currentMarkerId);
-                currentMarker = null;
-              }
         return super.onOptionsItemSelected(item);
     }
 
@@ -157,21 +137,24 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
-    String getAddressFromLocation(double latitude, double longitude) {
+    private String getAddressFromLocation(double latitude, double longitude) {
         try {
             List<Address> addresses;
-            Geocoder geocoder = new Geocoder(this, new Locale.Builder().setLanguage("UKR").setScript("Latn").setRegion("RS").build());
+            Geocoder geocoder = new Geocoder(this, new Locale.Builder().setLanguage("UKR").setScript("Latn").setRegion("UA").build());
             addresses = geocoder.getFromLocation(latitude, longitude, 1);
 
             String house = addresses.get(0).getFeatureName();
             String street = addresses.get(0).getThoroughfare();
 
-            if (!street.equals(house))
-                house = ", " + house;
-            else
-                house = "";
-
             street = street.replace("вулиця ", "вул. ");
+
+            if (!street.equals(house)) {
+                house = ", " + house;
+            }
+            else {
+                house = "";
+            }
+
             String address = street + house;
 
             return address;
